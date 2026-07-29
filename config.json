@@ -2,17 +2,45 @@
   "groups": [
     {
       "label": "Til Tokyo",
-      "from": ["OSL", "ARN", "CPH"],
-      "to": ["HND", "NRT"],
+      "from": [
+        "OSL",
+        "ARN",
+        "CPH"
+      ],
+      "to": [
+        "HND",
+        "NRT"
+      ],
       "date_from": "",
       "date_to": ""
     },
     {
       "label": "Fra Tokyo hjem",
-      "from": ["HND", "NRT"],
-      "to": ["OSL", "ARN", "CPH"],
+      "from": [
+        "HND",
+        "NRT"
+      ],
+      "to": [
+        "OSL",
+        "ARN",
+        "CPH"
+      ],
       "date_from": "",
       "date_to": ""
+    },
+    {
+      "label": "Tokyo 2026",
+      "from": [
+        "CPH",
+        "ARN",
+        "OSL"
+      ],
+      "to": [
+        "NRT",
+        "HND"
+      ],
+      "date_from": "2026-09-01",
+      "date_to": "2026-12-31"
     }
   ]
 }
