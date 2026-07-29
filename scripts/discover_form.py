@@ -30,9 +30,11 @@ def describe_page():
         for i, sel in enumerate(selects):
             name = sel.get_attribute("name")
             id_ = sel.get_attribute("id")
-            options = sel.locator("option").all_inner_texts()
+            options = sel.locator("option").all()
+            opt_pairs = [(o.get_attribute("value"), o.inner_text()) for o in options]
             print(f"[{i}] name={name!r} id={id_!r}")
-            print(f"    options: {options}")
+            for val, text in opt_pairs:
+                print(f"    value={val!r} -> {text!r}")
 
         print("\n--- checkbox/radio-input ---")
         inputs = page.locator("input[type=checkbox], input[type=radio]").all()
@@ -41,7 +43,6 @@ def describe_page():
             id_ = inp.get_attribute("id")
             value = inp.get_attribute("value")
             checked = inp.is_checked()
-            # Prøv å finne tilhørende <label>
             label_text = ""
             if id_:
                 label = page.locator(f'label[for="{id_}"]')
@@ -57,7 +58,15 @@ def describe_page():
             name = inp.get_attribute("name")
             id_ = inp.get_attribute("id")
             placeholder = inp.get_attribute("placeholder")
-            print(f"[{i}] name={name!r} id={id_!r} placeholder={placeholder!r}")
+            value = inp.get_attribute("value")
+            print(f"[{i}] name={name!r} id={id_!r} placeholder={placeholder!r} value={value!r}")
+
+        print("\n--- Skjulte input-felt (kan inneholde tokens/id-er) ---")
+        hidden_inputs = page.locator("input[type=hidden]").all()
+        for i, inp in enumerate(hidden_inputs):
+            name = inp.get_attribute("name")
+            value = inp.get_attribute("value")
+            print(f"[{i}] name={name!r} value={value!r}")
 
         print("\n--- <form>-elementer (action/metode) ---")
         forms = page.locator("form").all()
@@ -71,6 +80,53 @@ def describe_page():
         for i, b in enumerate(buttons):
             text = b.inner_text() if b.evaluate("el => el.tagName") == "BUTTON" else b.get_attribute("value")
             print(f"[{i}] text/value={text!r}")
+
+        # ---- Fase 2: simuler et ekte Tokyo-søk og fang opp POST-dataene ----
+        print("\n" + "=" * 60)
+        print("SIMULERER SØK: To=Tokyo, Cabin class=Business")
+        print("=" * 60)
+
+        captured = []
+
+        def on_request(request):
+            if request.method == "POST":
+                captured.append({
+                    "url": request.url,
+                    "post_data": request.post_data,
+                })
+
+        page.on("request", on_request)
+
+        try:
+            page.select_option("#To", label="Tokyo")
+        except Exception as e:
+            print(f"Klarte ikke velge Tokyo i #To: {e}")
+
+        try:
+            page.get_by_role("button", name="Search").click()
+        except Exception as e:
+            print(f"Klarte ikke klikke Search: {e}")
+
+        page.wait_for_load_state("networkidle")
+
+        if captured:
+            for req in captured:
+                print(f"\nURL: {req['url']}")
+                print(f"POST-data: {req['post_data']}")
+        else:
+            print("Ingen POST-forespørsel fanget opp (kan bety at søket skjer via GET, "
+                  "eller at det ikke trigget et nytt nettverkskall).")
+
+        print("\n--- Resulterende tabell(er) etter Tokyo-søk ---")
+        tables = page.locator("table").all()
+        print(f"Antall <table>-elementer på siden: {len(tables)}")
+        for i, table in enumerate(tables):
+            rows = table.locator("tr").all()
+            print(f"Tabell {i}: {len(rows)} rader")
+            for row in rows[:5]:
+                cells = row.locator("td").all_inner_texts()
+                if cells:
+                    print(f"    {cells}")
 
         browser.close()
 
