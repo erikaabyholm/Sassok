@@ -821,15 +821,15 @@
   }
 
   function parseTableRows(doc) {
-    const table = doc.querySelector('table');
-    if (!table) return [];
     const rows = [];
-    table.querySelectorAll('tr').forEach(tr => {
-      const tds = Array.from(tr.querySelectorAll('td'));
-      if (!tds.length) return;
-      rows.push({
-        texts: tds.map(td => td.textContent.trim()),
-        cellsHtml: tds
+    doc.querySelectorAll('table').forEach(table => {
+      table.querySelectorAll('tr').forEach(tr => {
+        const tds = Array.from(tr.querySelectorAll('td'));
+        if (!tds.length) return;
+        rows.push({
+          texts: tds.map(td => td.textContent.trim()),
+          cellsHtml: tds
+        });
       });
     });
     return rows;
@@ -912,9 +912,25 @@
       if (resp.ok) return await resp.text();
     } catch (e) { /* fortsetter til fallback */ }
 
-    const resp2 = await fetch(CORS_PROXY + encodeURIComponent(AWARDHACKS_URL));
-    if (!resp2.ok) throw new Error('proxy-feil');
-    return await resp2.text();
+    const proxies = [
+      (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+      (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+      (url) => `https://thingproxy.freeboard.io/fetch/${url}`,
+    ];
+
+    let lastError = null;
+    for (const buildUrl of proxies) {
+      try {
+        const resp = await fetch(buildUrl(AWARDHACKS_URL));
+        if (resp.ok) {
+          const text = await resp.text();
+          if (text && text.includes('<table')) return text;
+        }
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw lastError || new Error('Alle proxyer feilet');
   }
 
   async function runSearch() {
@@ -935,10 +951,11 @@
 
       const matches = [];
       rows.forEach(({ texts, cellsHtml }) => {
-        if (texts.length < 4) return;
+        if (texts.length < 3) return;
         const outCodes = parseRouteCodes(texts[0]);
         if (!outCodes) return;
         const outDate = extractDate(texts[1]);
+        const isRoundTrip = texts.length >= 5;
 
         for (const g of activeGroups) {
           const fromMatch = g.from.includes(outCodes.from);
@@ -946,7 +963,7 @@
           if (!fromMatch || !toMatch) continue;
           if (!dateInRange(outDate, g.date_from, g.date_to)) continue;
 
-          const retCodes = parseRouteCodes(texts[2] || "");
+          const retCodes = isRoundTrip ? parseRouteCodes(texts[2] || "") : null;
           const lastCellText = texts[texts.length - 1] || "";
           const lastCellEl = cellsHtml[cellsHtml.length - 1];
           const anchor = lastCellEl ? lastCellEl.querySelector('a') : null;
@@ -955,8 +972,8 @@
             groupLabel: g.label || `${outCodes.from}→${outCodes.to}`,
             outRoute: `${outCodes.from} - ${outCodes.to}`,
             outDeparture: texts[1] || "",
-            retRoute: retCodes ? `${retCodes.from} - ${retCodes.to}` : "",
-            retDeparture: texts[3] || "",
+            retRoute: retCodes ? `${retCodes.from} - ${retCodes.to}` : (isRoundTrip ? "" : "enveis"),
+            retDeparture: isRoundTrip ? (texts[3] || "") : "",
             seats: extractSeats(texts[0]),
             duration: extractDuration(lastCellText),
             bookHref: anchor ? anchor.getAttribute('href') : null,
