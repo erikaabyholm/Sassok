@@ -50,18 +50,15 @@ def fetch_rows():
     soup = BeautifulSoup(resp.text, "html.parser")
 
     rows = []
-    table = soup.find("table")
-    if not table:
-        return rows
-
-    for tr in table.find_all("tr"):
-        tds = tr.find_all("td")
-        if not tds:
-            continue
-        rows.append({
-            "texts": [td.get_text(" ", strip=True) for td in tds],
-            "tds": tds,
-        })
+    for table in soup.find_all("table"):
+        for tr in table.find_all("tr"):
+            tds = tr.find_all("td")
+            if not tds:
+                continue
+            rows.append({
+                "texts": [td.get_text(" ", strip=True) for td in tds],
+                "tds": tds,
+            })
     return rows
 
 
@@ -137,13 +134,14 @@ def find_matches(rows, groups_cfg):
     matches = []
     for row in rows:
         texts = row["texts"]
-        if len(texts) < 4:
+        if len(texts) < 3:
             continue
         out_codes = parse_route_codes(texts[0])
         if not out_codes:
             continue
         out_from, out_to = out_codes
         out_date = extract_date(texts[1])
+        is_round_trip = len(texts) >= 5
 
         for g in resolved:
             if out_from not in g["from"] or out_to not in g["to"]:
@@ -151,7 +149,7 @@ def find_matches(rows, groups_cfg):
             if not date_in_range(out_date, g["date_from"], g["date_to"]):
                 continue
 
-            ret_codes = parse_route_codes(texts[2]) if len(texts) > 2 else None
+            ret_codes = parse_route_codes(texts[2]) if is_round_trip else None
             last_text = texts[-1] if texts else ""
             last_td = row["tds"][-1] if row["tds"] else None
             anchor = last_td.find("a") if last_td else None
@@ -160,8 +158,9 @@ def find_matches(rows, groups_cfg):
                 "group_label": g["label"] or f"{out_from}→{out_to}",
                 "out_route": f"{out_from} - {out_to}",
                 "out_departure": texts[1] if len(texts) > 1 else "",
-                "ret_route": f"{ret_codes[0]} - {ret_codes[1]}" if ret_codes else "",
-                "ret_departure": texts[3] if len(texts) > 3 else "",
+                "ret_route": (f"{ret_codes[0]} - {ret_codes[1]}" if ret_codes
+                              else ("" if is_round_trip else "enveis")),
+                "ret_departure": texts[3] if (is_round_trip and len(texts) > 3) else "",
                 "seats": extract_seats(texts[0]),
                 "duration": extract_duration(last_text),
                 "book_href": anchor["href"] if anchor and anchor.has_attr("href") else None,
