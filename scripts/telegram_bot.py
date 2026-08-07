@@ -49,6 +49,12 @@ SEASON_MONTHS = {
     "sommer": (6, 8), "vinter": (12, 2),
 }
 
+MONTH_NAMES = {
+    "januar": 1, "februar": 2, "mars": 3, "april": 4, "mai": 5, "juni": 6,
+    "juli": 7, "august": 8, "september": 9, "oktober": 10, "november": 11,
+    "desember": 12,
+}
+
 TRIGGER_WORDS = ("sjekk", "søk", "sok")
 
 
@@ -114,9 +120,12 @@ def parse_command(text):
         if key in lower and SEASON_MONTHS[key] not in [SEASON_MONTHS[s] for s in matched_seasons]:
             matched_seasons.append(key)
 
+    matched_months = [name for name in MONTH_NAMES if name in lower]
+
     date_from = date_to = ""
-    if year and matched_seasons:
+    if year and (matched_seasons or matched_months):
         from datetime import date as _date
+        import calendar as _calendar
         spans = []
         for season in matched_seasons:
             start_m, end_m = SEASON_MONTHS[season]
@@ -124,6 +133,10 @@ def parse_command(text):
                 spans.append((_date(year, 12, 1), _date(year + 1, 2, 28)))
             else:
                 spans.append((_date(year, start_m, 1), _date(year, end_m, 28)))
+        for month_name in matched_months:
+            m = MONTH_NAMES[month_name]
+            last_day = _calendar.monthrange(year, m)[1]
+            spans.append((_date(year, m, 1), _date(year, m, last_day)))
         overall_start = min(s for s, _ in spans)
         overall_end = max(e for _, e in spans)
         date_from = overall_start.strftime("%Y-%m-%d")
@@ -232,3 +245,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+  
