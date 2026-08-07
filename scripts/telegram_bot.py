@@ -16,12 +16,13 @@ import os
 import re
 import sys
 import json
+import html
 import requests
 
 # Gjenbruker det direkte awardhacks.se-API-et
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from awardhacks_api import search_group_matches
-from check_awardhacks import format_match, send_telegram
+from check_awardhacks import format_match, send_telegram, MATCH_SEPARATOR
 
 OFFSET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "telegram_offset.txt")
 
@@ -82,17 +83,129 @@ def parse_explicit_direction(lower):
     return None, None
 
 
+ALL_WORDS = ("alle", "alt", "hvor som helst")
+ALL_AIRPORTS_PHRASES = ("alle flyplasser", "alle ruter", "alle destinasjoner", "alt", "hvor som helst")
+
+RUN_WORKFLOW_TRIGGERS = (
+    "kjør workflow", "kjør sjekk", "kjør daglig sjekk", "start sjekk",
+    "trigger sjekk", "kjør den daglige", "start workflow",
+)
+
+
+def trigger_award_check_workflow():
+    """Starter award-check.yml-workflowen på nytt via GitHub sitt API, med
+    tokenet GitHub selv gir jobben (ingen egen PAT nødvendig)."""
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not token or not repo:
+        return False, "Mangler GITHUB_TOKEN eller GITHUB_REPOSITORY i miljøet til denne jobben."
+
+    url = f"https://api.github.com/repos/{repo}/actions/workflows/award-check.yml/dispatches"
+    try:
+        resp = requests.post(
+            url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {token}",
+            },
+            json={"ref": "main"},
+            timeout=30,
+        )
+    except requests.RequestException as e:
+        return False, f"Nettverksfeil: {e}"
+
+    if resp.status_code == 204:
+        return True, "▶️ Daglig sjekk startet! Svar kommer i egen melding om ca. 30-60 sekunder."
+    return False, f"Klarte ikke starte workflowen (HTTP {resp.status_code}): {resp.text[:200]}"
+
+
+HELP_TRIGGERS = (
+    "hjelp", "hvilke klasser", "hvilke byer", "hvilke ord", "hvordan spør",
+    "hvordan søker", "kommandoer", "hva kan jeg skrive", "hva kan jeg spørre",
+    "instruksjoner", "help",
+)
+
+HELP_TEXT = """✈️ Slik spør du boten:
+
+Meldingen må inneholde "sjekk" eller "søk".
+
+📍 STEDER (bruk disse ordene):
+Skandinavia: Oslo, København, Stockholm, Göteborg, Aalborg
+Andre: Tokyo, Chicago, Washington, Atlanta, Boston, Los Angeles, \
+San Francisco, Seattle, Miami, New York, Toronto, Seoul, Mumbai, \
+Bangkok, Dubai, Phuket, Krabi
+
+🔀 RETNING:
+"sjekk Tokyo 2026" → Skandinavia (alle 3) til Tokyo
+"sjekk fra Tokyo til Oslo 2026" → eksplisitt retning
+"sjekk alle fra Oslo 2026" → Oslo til alle destinasjoner
+"sjekk alle til Tokyo 2026" → alle avreisesteder til Tokyo
+"sjekk alle flyplasser 2026" → helt bredt søk
+
+📅 DATO (valgfritt, kombiner fritt):
+År: "2026"
+Sesong: vår, sommer, høst, vinter
+Måned: januar-desember
+Eksakt dato: "29. september 2026"
+Periode: "fra 29. september til 12. oktober 2026"
+
+💺 KABINKLASSE (valgfritt, standard er "any"):
+business, plus, economy, any
+
+📋 EKSEMPLER:
+sjekk Tokyo høst 2026 economy
+sjekk fra Oslo til Dubai 2026 business
+sjekk alle fra København november 2026"""
+
+
 def parse_command(text):
     """Tolker en fritekst-melding og returnerer en søkegruppe, eller None
     hvis meldingen ikke inneholder et gjenkjennelig sjekk-kommando."""
     lower = text.lower().strip()
+
+    if any(phrase in lower for phrase in RUN_WORKFLOW_TRIGGERS):
+        return {"run_workflow": True}
+
+    if any(phrase in lower for phrase in HELP_TRIGGERS):
+        return {"help": True}
+
     if not any(w in lower for w in TRIGGER_WORDS):
+        # Mangler utløser-ordet - men gi tilbakemelding hvis meldingen
+        # tydelig ser ut som et forsøk på en kommando (nevner et kjent sted,
+        # et årstall, eller "fra"/"til"), slik at vanlig prat fortsatt ignoreres.
+        looks_like_attempt = (
+            any(city in lower for city in CITY_TO_CODES)
+            or re.search(r"20\d{2}", lower)
+            or re.search(r"\bfra\b|\btil\b", lower)
+        )
+        if looks_like_attempt:
+            return {"error": "Jeg reagerer bare på meldinger som inneholder \"sjekk\" eller \"søk\". Prøv f.eks. \"sjekk Tokyo 2026\"."}
         return None
 
-    explicit_from, explicit_to = parse_explicit_direction(lower)
+    m_fra = re.search(r"\bfra\s+(.+?)(?:\s+til\b|$)", lower)
+    m_til = re.search(r"\btil\s+(.+?)(?:\s+fra\b|$)", lower)
+    from_found = find_city_codes_in_text(m_fra.group(1)) if m_fra else set()
+    to_found = find_city_codes_in_text(m_til.group(1)) if m_til else set()
+    has_all_word = any(w in lower for w in ALL_WORDS)
 
-    if explicit_from and explicit_to:
-        from_codes, to_codes = explicit_from, explicit_to
+    if m_fra and not from_found and not has_all_word:
+        return {"error": "Kjente ikke igjen stedet etter \"fra\" i meldingen din. Prøv et kjent sted (f.eks. Oslo, København, Stockholm, Tokyo, Dubai...), eller skriv \"alle\"."}
+
+    if m_til and not to_found and not has_all_word:
+        return {"error": "Kjente ikke igjen stedet etter \"til\" i meldingen din. Prøv et kjent sted (f.eks. Oslo, København, Stockholm, Tokyo, Dubai...), eller skriv \"alle\"."}
+
+    if from_found and to_found:
+        # Eksplisitt "fra X til Y" med begge sider kjent
+        from_codes, to_codes = from_found, to_found
+    elif from_found and has_all_word:
+        # F.eks. "sjekk alle fra Oslo" - Oslo som avreise, alle destinasjoner
+        from_codes, to_codes = from_found, {"ALL"}
+    elif to_found and has_all_word:
+        # F.eks. "sjekk alle til Tokyo" - Tokyo som destinasjon, alle avreisesteder
+        from_codes, to_codes = {"ALL"}, to_found
+    elif any(phrase in lower for phrase in ALL_AIRPORTS_PHRASES) and not from_found and not to_found:
+        # Ingen spesifikk by nevnt i det hele tatt - bredt søk begge veier
+        from_codes, to_codes = {"ALL"}, {"ALL"}
     else:
         to_codes = set()
         from_codes = set()
@@ -104,7 +217,7 @@ def parse_command(text):
                     to_codes.update(codes)
 
         if not to_codes:
-            return {"error": "Fant ingen kjent destinasjon i meldingen. Prøv f.eks. 'sjekk Tokyo 2026' eller 'sjekk fra Tokyo til Oslo 2026'."}
+            return {"error": "Fant ingen kjent destinasjon i meldingen. Prøv f.eks. 'sjekk Tokyo 2026', 'sjekk fra Tokyo til Oslo 2026', eller 'sjekk alle flyplasser 2026' for et bredt søk."}
 
         if not from_codes:
             from_codes = set(DEFAULT_FROM)
@@ -239,6 +352,15 @@ def main():
             send_telegram(f"⚠️ {group['error']}")
             continue
 
+        if group.get("help"):
+            send_telegram(HELP_TEXT)
+            continue
+
+        if group.get("run_workflow"):
+            success, msg = trigger_award_check_workflow()
+            send_telegram(("✅ " if success else "⚠️ ") + msg)
+            continue
+
         try:
             matches = search_group_matches(
                 group["label"], group["from"], group["to"],
@@ -250,11 +372,9 @@ def main():
             continue
 
         if matches:
-            lines = [f"✈️ {len(matches)} treff for \"{text.strip()}\":\n"]
-            for m in matches:
-                lines.append(format_match(m))
-                lines.append("")
-            send_telegram("\n".join(lines).strip())
+            header = f"✈️ {len(matches)} treff for \"{html.escape(text.strip())}\":\n"
+            body = MATCH_SEPARATOR.join(format_match(m) for m in matches)
+            send_telegram(header + "\n" + body, parse_mode="HTML")
         else:
             date_desc = f" ({group['date_from']} til {group['date_to']})" if group['date_from'] else ""
             send_telegram(
