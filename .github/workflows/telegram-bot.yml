@@ -2,11 +2,13 @@ name: Telegram-bot polling
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    # Sjekker for nye Telegram-meldinger hvert 2. minutt
+    - cron: "*/2 * * * *"
   workflow_dispatch: {}
 
 permissions:
-  contents: write
+  contents: write  # trengs for å committe offset-filen tilbake
+  actions: write   # trengs for å kunne starte award-check.yml på forespørsel
 
 jobs:
   poll:
@@ -27,6 +29,8 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: python scripts/telegram_bot.py
 
       - name: Lagre offset-fil (hvis endret)
