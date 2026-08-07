@@ -3,16 +3,14 @@
     {
       "label": "Til Tokyo",
       "from": [
-        "OSL",
-        "ARN",
         "CPH"
       ],
       "to": [
         "HND",
         "NRT"
       ],
-      "date_from": "",
-      "date_to": ""
+      "date_from": "2026-12-01",
+      "date_to": "2026-12-31"
     }
   ]
 }
