@@ -120,12 +120,22 @@ def parse_command(text):
         if key in lower and SEASON_MONTHS[key] not in [SEASON_MONTHS[s] for s in matched_seasons]:
             matched_seasons.append(key)
 
-    matched_months = [name for name in MONTH_NAMES if name in lower]
-
     date_from = date_to = ""
-    if year and (matched_seasons or matched_months):
+    if year:
         from datetime import date as _date
         import calendar as _calendar
+
+        # Eksplisitte datoer, f.eks. "29. september" eller "12 oktober".
+        # (?<!\d) hindrer at siste sifre i årstallet (2026) feiltolkes som dag.
+        month_alt = "|".join(sorted(MONTH_NAMES.keys(), key=len, reverse=True))
+        explicit_dates = []
+        for m in re.finditer(rf"(?<!\d)(\d{{1,2}})\.?\s*({month_alt})", lower):
+            day, month_name = int(m.group(1)), m.group(2)
+            month = MONTH_NAMES[month_name]
+            max_day = _calendar.monthrange(year, month)[1]
+            if 1 <= day <= max_day:
+                explicit_dates.append(_date(year, month, day))
+
         spans = []
         for season in matched_seasons:
             start_m, end_m = SEASON_MONTHS[season]
@@ -133,23 +143,34 @@ def parse_command(text):
                 spans.append((_date(year, 12, 1), _date(year + 1, 2, 28)))
             else:
                 spans.append((_date(year, start_m, 1), _date(year, end_m, 28)))
-        for month_name in matched_months:
-            m = MONTH_NAMES[month_name]
-            last_day = _calendar.monthrange(year, m)[1]
-            spans.append((_date(year, m, 1), _date(year, m, last_day)))
-        overall_start = min(s for s, _ in spans)
-        overall_end = max(e for _, e in spans)
-        date_from = overall_start.strftime("%Y-%m-%d")
-        date_to = overall_end.strftime("%Y-%m-%d")
-    elif year:
-        date_from = f"{year}-01-01"
-        date_to = f"{year}-12-31"
 
-    cabin = "business"
+        if explicit_dates:
+            # Eksplisitte datoer gitt - bruk disse presist, ikke hele måneder
+            # (selv om månedsnavnene også nevnes andre steder i meldingen).
+            spans.extend((d, d) for d in explicit_dates)
+        else:
+            for month_name in MONTH_NAMES:
+                if month_name in lower:
+                    m = MONTH_NAMES[month_name]
+                    last_day = _calendar.monthrange(year, m)[1]
+                    spans.append((_date(year, m, 1), _date(year, m, last_day)))
+
+        if spans:
+            overall_start = min(s for s, _ in spans)
+            overall_end = max(e for _, e in spans)
+            date_from = overall_start.strftime("%Y-%m-%d")
+            date_to = overall_end.strftime("%Y-%m-%d")
+        else:
+            date_from = f"{year}-01-01"
+            date_to = f"{year}-12-31"
+
+    cabin = "any"
     if "economy" in lower or "økonomi" in lower or "okonomi" in lower:
         cabin = "economy"
     elif "plus" in lower:
         cabin = "plus"
+    elif "business" in lower:
+        cabin = "business"
     elif "any" in lower or "mixed" in lower or "alle klasser" in lower:
         cabin = "any"
 
@@ -222,7 +243,7 @@ def main():
             matches = search_group_matches(
                 group["label"], group["from"], group["to"],
                 date_from=group["date_from"], date_to=group["date_to"],
-                cabin=group.get("cabin", "business"),
+                cabin=group.get("cabin", "any"),
             )
         except Exception as e:
             send_telegram(f"⚠️ Noe gikk galt under søket: {e}")
