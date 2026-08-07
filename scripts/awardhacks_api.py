@@ -81,8 +81,8 @@ def resolve_site_codes(codes):
     return list(seen.items()), unsupported
 
 
-def search_one(session, token, from_code, to_code, cabin="business",
-                return_trip=True, min_days=0, max_days=30):
+def search_one(session, token, from_code, to_code, cabin="any",
+                return_trip=True, min_days=0, max_days=60):
     """Gjør ett søk mot awardhacks.se for en spesifikk from/to-kombinasjon.
     Returnerer en liste med rå-rader (samme format som før: dict med
     'texts' og 'tds')."""
@@ -173,6 +173,20 @@ def date_in_range(d, date_from, date_to):
     return True
 
 
+def build_sas_flex_url(from_code, to_code, out_date):
+    """Bygger en lenke til SAS sin egen fleksible-datoer-kalendervisning for
+    en gitt rute/dato (samme URL-mønster SAS selv genererer, uten å binde
+    til et spesifikt flightnummer). Åpner rett i nettleseren, viser priser
+    for nærliggende dager automatisk."""
+    if not out_date:
+        return None
+    date_str = out_date.strftime("%Y%m%d")
+    return (
+        f"https://www.sas.se/en/book/flights?"
+        f"search=OW_{from_code}-{to_code}-{date_str}_a1c0i0y0&bookingFlow=points"
+    )
+
+
 def build_match(row, group_label):
     """Bygger en ferdig match-dict fra en rå-rad, uavhengig av om det er
     rundtur (5 kolonner) eller enveis (3 kolonner)."""
@@ -189,11 +203,12 @@ def build_match(row, group_label):
     last_text = texts[-1] if texts else ""
     last_td = tds[-1] if tds else None
     anchor = last_td.find("a") if last_td else None
+    out_date = extract_date(texts[1])
 
     return {
         "group_label": group_label,
         "out_route": f"{out_codes[0]} - {out_codes[1]}",
-        "out_date": extract_date(texts[1]),
+        "out_date": out_date,
         "out_departure": texts[1] if len(texts) > 1 else "",
         "ret_route": (f"{ret_codes[0]} - {ret_codes[1]}" if ret_codes
                       else ("" if is_round_trip else "enveis")),
@@ -202,11 +217,12 @@ def build_match(row, group_label):
         "duration": extract_duration(last_text),
         "book_href": anchor["href"] if anchor and anchor.has_attr("href") else None,
         "open_jaw": "Open jaw" in last_text,
+        "sas_flex_url": build_sas_flex_url(out_codes[0], out_codes[1], out_date),
     }
 
 
 def search_group_matches(group_label, from_codes, to_codes, date_from="", date_to="",
-                          cabin="business", min_days=0, max_days=30):
+                          cabin="any", min_days=0, max_days=60):
     """Høynivå-funksjon: søker en gruppe og returnerer ferdige match-dicts,
     filtrert på dato lokalt (siden vi ikke stoler blindt på serverens eget
     datofilter-format)."""
@@ -220,7 +236,7 @@ def search_group_matches(group_label, from_codes, to_codes, date_from="", date_t
             continue
         matches.append(m)
     return matches
-def search_group(from_codes, to_codes, cabin="business", min_days=0, max_days=30):
+def search_group(from_codes, to_codes, cabin="any", min_days=0, max_days=60):
     """Søker alle relevante from/to-kombinasjoner for en søkegruppe, både
     rundtur og enveis, og returnerer alle rå-rader samlet (med duplikater
     fjernet på tvers av kombinasjoner)."""
