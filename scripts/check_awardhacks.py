@@ -112,11 +112,11 @@ def format_match(m):
     return "\n".join(lines)
 
 
-def send_telegram(message, parse_mode=None):
+def send_telegram(message, parse_mode=None, chat_id=None):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
-        print("Mangler TELEGRAM_BOT_TOKEN eller TELEGRAM_CHAT_ID - hopper over varsling.")
+        print("Mangler TELEGRAM_BOT_TOKEN eller chat_id - hopper over varsling.")
         print(message)
         return
 
