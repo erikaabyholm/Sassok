@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """
 Søker awardhacks.se sitt faktiske søke-API direkte (POST /Home/ListResult)
@@ -65,9 +66,11 @@ def format_match(m):
         parts.append(m["duration"])
     line = " | ".join(p for p in parts if p)
     if m["book_href"]:
-        line += f"\n  {m['book_href']}"
+        line += f"\n  Bestill: {m['book_href']}"
     elif m["open_jaw"]:
         line += "\n  (open jaw - book manuelt på sas.no)"
+    if m.get("sas_flex_url"):
+        line += f"\n  Se nærliggende datoer: {m['sas_flex_url']}"
     return line
 
 
@@ -107,7 +110,7 @@ def main():
             continue
         label = g.get("label") or f"{'/'.join(from_codes)}→{'/'.join(to_codes)}"
         labels.append(label)
-        cabin = g.get("cabin", "business")
+        cabin = g.get("cabin", "any")
         try:
             matches = search_group_matches(
                 label, from_codes, to_codes,
