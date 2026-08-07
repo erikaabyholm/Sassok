@@ -2,8 +2,9 @@ name: Awardhacks daglig sjekk
 
 on:
   schedule:
+    # Kjører 06:30 UTC = 07:30 norsk vintertid / 08:30 sommertid
     - cron: "30 6 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch: {}  # lar deg trigge manuelt fra Actions-fanen for testing
 
 jobs:
   check:
