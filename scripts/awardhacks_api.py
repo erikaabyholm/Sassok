@@ -38,6 +38,7 @@ AIRPORT_TO_SITE_CODE = {
     "JFK": "NYC", "EWR": "NYC",
     "YYZ": "YYZ", "ICN": "ICN", "BKK": "BKK", "DXB": "DXB",
     "HKT": "HKT", "KBV": "KBV", "BOM": "BOM",
+    "ALL": "All",
 }
 
 # GOT (Göteborg) og AAL (Aalborg) støttes ikke av awardhacks.se sitt skjema.
@@ -49,6 +50,7 @@ ROUTE_RE = re.compile(r"([A-Z]{3})\s*-\s*([A-Z]{3})")
 DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 SEATS_RE = re.compile(r"(\d+/\d+/\d+)")
 DURATION_RE = re.compile(r"duration:\s*(\d+d)")
+SEEN_AGO_RE = re.compile(r"seats\s+(\d+\w*\s*ago)")
 
 
 def get_session_and_token():
@@ -154,6 +156,11 @@ def extract_duration(text):
     return m.group(1) if m else ""
 
 
+def extract_seen_ago(text):
+    m = SEEN_AGO_RE.search(text)
+    return m.group(1) if m else ""
+
+
 def date_in_range(d, date_from, date_to):
     from datetime import date
     date_from = (date_from or "").strip()
@@ -214,6 +221,7 @@ def build_match(row, group_label):
                       else ("" if is_round_trip else "enveis")),
         "ret_departure": texts[3] if (is_round_trip and len(texts) > 3) else "",
         "seats": extract_seats(texts[0]),
+        "seen_ago": extract_seen_ago(texts[0]),
         "duration": extract_duration(last_text),
         "book_href": anchor["href"] if anchor and anchor.has_attr("href") else None,
         "open_jaw": "Open jaw" in last_text,
