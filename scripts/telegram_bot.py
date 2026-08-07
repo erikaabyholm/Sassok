@@ -109,22 +109,25 @@ def parse_command(text):
     year_match = re.search(r"(20\d{2})", lower)
     year = int(year_match.group(1)) if year_match else None
 
-    season = None
+    matched_seasons = []
     for key in SEASON_MONTHS:
-        if key in lower:
-            season = key
-            break
+        if key in lower and SEASON_MONTHS[key] not in [SEASON_MONTHS[s] for s in matched_seasons]:
+            matched_seasons.append(key)
 
     date_from = date_to = ""
-    if year and season:
-        start_m, end_m = SEASON_MONTHS[season]
-        if season in ("vinter",):
-            date_from = f"{year}-12-01"
-            date_to = f"{year + 1}-02-28"
-        else:
-            date_from = f"{year}-{start_m:02d}-01"
-            end_year = year
-            date_to = f"{end_year}-{end_m:02d}-28"
+    if year and matched_seasons:
+        from datetime import date as _date
+        spans = []
+        for season in matched_seasons:
+            start_m, end_m = SEASON_MONTHS[season]
+            if season in ("vinter",):
+                spans.append((_date(year, 12, 1), _date(year + 1, 2, 28)))
+            else:
+                spans.append((_date(year, start_m, 1), _date(year, end_m, 28)))
+        overall_start = min(s for s, _ in spans)
+        overall_end = max(e for _, e in spans)
+        date_from = overall_start.strftime("%Y-%m-%d")
+        date_to = overall_end.strftime("%Y-%m-%d")
     elif year:
         date_from = f"{year}-01-01"
         date_to = f"{year}-12-31"
