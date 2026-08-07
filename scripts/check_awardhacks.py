@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """
 Søker awardhacks.se sitt faktiske søke-API direkte (POST /Home/ListResult)
@@ -14,6 +13,7 @@ redigeres enklest i editor.html, eller direkte i config.json.
 """
 
 import os
+import re
 import sys
 import json
 import requests
@@ -52,29 +52,67 @@ def resolve_group_codes(g):
     return codes(g.get("from"), g.get("custom_from")), codes(g.get("to"), g.get("custom_to"))
 
 
+MATCH_SEPARATOR = "\n" + "─" * 18 + "\n"
+
+
+def format_seen_ago_no(seen_ago):
+    """Gjør om '19h ago' til '19 timer siden' e.l."""
+    m = re.match(r"(\d+)\s*(\w+)", seen_ago or "")
+    if not m:
+        return "Ukjent tidspunkt"
+    value, unit = m.group(1), m.group(2)
+    if unit.startswith("h"):
+        enhet = "time" if value == "1" else "timer"
+    elif unit.startswith("m"):
+        enhet = "minutt" if value == "1" else "minutter"
+    elif unit.startswith("d"):
+        enhet = "dag" if value == "1" else "dager"
+    else:
+        enhet = unit
+    return f"{value} {enhet} siden"
+
+
+def reorder_seats(seats):
+    """Snur rekkefølgen på de tre seter-tallene. Merk: awardhacks.se oppgir
+    ikke offisielt hva hver posisjon betyr - dette er en ren snuoperasjon,
+    ikke en garantert Business/Plus/Economy-sortering."""
+    parts = (seats or "").split("/")
+    return "/".join(reversed(parts)) if len(parts) == 3 else (seats or "")
+
+
+def html_escape_url(url):
+    return (url or "").replace("&", "&amp;")
+
+
 def format_match(m):
-    parts = [
-        f"[{m['group_label']}]",
-        m["out_route"],
-        m["out_departure"],
-    ]
-    if m["ret_route"]:
-        parts.append("→ retur " + m["ret_route"])
-        parts.append(m["ret_departure"])
-    parts.append(f"seter:{m['seats']}")
+    is_round_trip = bool(m["ret_route"]) and m["ret_route"] != "enveis"
+
+    lines = [format_seen_ago_no(m.get("seen_ago"))]
+
+    if is_round_trip:
+        lines.append(f"{m['out_route']}  ↔  {m['ret_route']}")
+        lines.append(f"{m['out_departure']}  →  {m['ret_departure']}")
+    else:
+        lines.append(m["out_route"])
+        lines.append(m["out_departure"])
+
+    lines.append(f"Seter: {reorder_seats(m['seats'])}")
+
     if m["duration"]:
-        parts.append(m["duration"])
-    line = " | ".join(p for p in parts if p)
+        lines.append(m["duration"])
+
     if m["book_href"]:
-        line += f"\n  Bestill: {m['book_href']}"
+        lines.append(f'<a href="{html_escape_url(m["book_href"])}">Bestill</a>')
     elif m["open_jaw"]:
-        line += "\n  (open jaw - book manuelt på sas.no)"
+        lines.append("(open jaw - book manuelt på sas.no)")
+
     if m.get("sas_flex_url"):
-        line += f"\n  Se nærliggende datoer: {m['sas_flex_url']}"
-    return line
+        lines.append(f'<a href="{html_escape_url(m["sas_flex_url"])}">Se nærliggende datoer</a>')
+
+    return "\n".join(lines)
 
 
-def send_telegram(message):
+def send_telegram(message, parse_mode=None):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
@@ -87,11 +125,14 @@ def send_telegram(message):
     chunks = [message[i:i + max_len] for i in range(0, len(message), max_len)] or [message]
 
     for chunk in chunks:
-        r = requests.post(api_url, data={
+        data = {
             "chat_id": chat_id,
             "text": chunk,
             "disable_web_page_preview": True,
-        }, timeout=30)
+        }
+        if parse_mode:
+            data["parse_mode"] = parse_mode
+        r = requests.post(api_url, data=data, timeout=30)
         if r.status_code != 200:
             print(f"Feil ved sending til Telegram: {r.status_code} {r.text}", file=sys.stderr)
 
@@ -124,16 +165,15 @@ def main():
     today = os.popen("date +%Y-%m-%d").read().strip()
 
     if all_matches:
-        lines = [f"✈️ Awardhacks-sjekk {today} - {len(all_matches)} treff:\n"]
-        for m in all_matches:
-            lines.append(format_match(m))
-            lines.append("")
-        message = "\n".join(lines).strip()
+        header = f"✈️ Awardhacks-sjekk {today} - {len(all_matches)} treff:\n"
+        body = MATCH_SEPARATOR.join(format_match(m) for m in all_matches)
+        message = header + "\n" + body
+        send_telegram(message, parse_mode="HTML")
     else:
         message = f"✈️ Awardhacks-sjekk {today}: ingen ledige bonusseter for søkegruppene ({', '.join(labels) or 'ingen'}) akkurat nå."
+        send_telegram(message)
 
     print(message)
-    send_telegram(message)
 
 
 if __name__ == "__main__":
