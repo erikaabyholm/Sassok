@@ -319,10 +319,18 @@ def get_updates(token, offset):
 
 def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if not token or not chat_id:
+    owner_chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not owner_chat_id:
         print("Mangler TELEGRAM_BOT_TOKEN eller TELEGRAM_CHAT_ID.", file=sys.stderr)
         return
+
+    # Ekstra chat-ID-er som får lov til å spørre boten (komma-separert),
+    # i tillegg til eieren. Kun for engangs-spørringer - den daglige
+    # sjekken (config.json) sendes uansett kun til eieren (TELEGRAM_CHAT_ID).
+    allowed_extra = os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", "")
+    allowed_chat_ids = {str(owner_chat_id)} | {
+        c.strip() for c in allowed_extra.split(",") if c.strip()
+    }
 
     offset = load_offset()
     updates = get_updates(token, offset)
@@ -338,8 +346,8 @@ def main():
         text = message.get("text", "")
         sender_chat_id = str(message.get("chat", {}).get("id", ""))
 
-        if sender_chat_id != str(chat_id):
-            continue  # ignorer meldinger fra andre enn deg selv
+        if sender_chat_id not in allowed_chat_ids:
+            continue  # ikke på tillatelseslisten, ignorer stille
 
         if not text:
             continue
@@ -349,16 +357,16 @@ def main():
             continue  # ikke en sjekk-kommando, ignorer stille
 
         if "error" in group:
-            send_telegram(f"⚠️ {group['error']}")
+            send_telegram(f"⚠️ {group['error']}", chat_id=sender_chat_id)
             continue
 
         if group.get("help"):
-            send_telegram(HELP_TEXT)
+            send_telegram(HELP_TEXT, chat_id=sender_chat_id)
             continue
 
         if group.get("run_workflow"):
             success, msg = trigger_award_check_workflow()
-            send_telegram(("✅ " if success else "⚠️ ") + msg)
+            send_telegram(("✅ " if success else "⚠️ ") + msg, chat_id=sender_chat_id)
             continue
 
         try:
@@ -368,17 +376,18 @@ def main():
                 cabin=group.get("cabin", "any"),
             )
         except Exception as e:
-            send_telegram(f"⚠️ Noe gikk galt under søket: {e}")
+            send_telegram(f"⚠️ Noe gikk galt under søket: {e}", chat_id=sender_chat_id)
             continue
 
         if matches:
             header = f"✈️ {len(matches)} treff for \"{html.escape(text.strip())}\":\n"
             body = MATCH_SEPARATOR.join(format_match(m) for m in matches)
-            send_telegram(header + "\n" + body, parse_mode="HTML")
+            send_telegram(header + "\n" + body, parse_mode="HTML", chat_id=sender_chat_id)
         else:
             date_desc = f" ({group['date_from']} til {group['date_to']})" if group['date_from'] else ""
             send_telegram(
-                f"✈️ Ingen ledige seter funnet for \"{text.strip()}\"{date_desc} akkurat nå."
+                f"✈️ Ingen ledige seter funnet for \"{text.strip()}\"{date_desc} akkurat nå.",
+                chat_id=sender_chat_id,
             )
 
     save_offset(highest_id)
