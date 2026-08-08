@@ -3,7 +3,9 @@
     {
       "label": "Til Tokyo",
       "from": [
-        "CPH"
+        "CPH",
+        "ARN",
+        "OSL"
       ],
       "to": [
         "HND",
