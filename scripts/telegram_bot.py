@@ -22,7 +22,7 @@ import requests
 # Gjenbruker det direkte awardhacks.se-API-et
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from awardhacks_api import search_group_matches
-from check_awardhacks import format_match, send_telegram, MATCH_SEPARATOR
+from check_awardhacks import format_match, send_telegram, MATCH_SEPARATOR, chunk_blocks
 
 OFFSET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "telegram_offset.txt")
 
@@ -226,54 +226,73 @@ def parse_command(text):
             from_codes, to_codes = to_codes, from_codes
 
     year_match = re.search(r"(20\d{2})", lower)
-    year = int(year_match.group(1)) if year_match else None
+    explicit_year = int(year_match.group(1)) if year_match else None
 
     matched_seasons = []
     for key in SEASON_MONTHS:
         if key in lower and SEASON_MONTHS[key] not in [SEASON_MONTHS[s] for s in matched_seasons]:
             matched_seasons.append(key)
 
+    has_month_word = any(name in lower for name in MONTH_NAMES)
+    has_date_hint = bool(matched_seasons) or has_month_word
+
     date_from = date_to = ""
-    if year:
+    year_note = ""
+
+    if explicit_year or has_date_hint:
         from datetime import date as _date
         import calendar as _calendar
 
-        # Eksplisitte datoer, f.eks. "29. september" eller "12 oktober".
-        # (?<!\d) hindrer at siste sifre i årstallet (2026) feiltolkes som dag.
-        month_alt = "|".join(sorted(MONTH_NAMES.keys(), key=len, reverse=True))
-        explicit_dates = []
-        for m in re.finditer(rf"(?<!\d)(\d{{1,2}})\.?\s*({month_alt})", lower):
-            day, month_name = int(m.group(1)), m.group(2)
-            month = MONTH_NAMES[month_name]
-            max_day = _calendar.monthrange(year, month)[1]
-            if 1 <= day <= max_day:
-                explicit_dates.append(_date(year, month, day))
+        def build_spans(yr):
+            month_alt = "|".join(sorted(MONTH_NAMES.keys(), key=len, reverse=True))
+            explicit_dates = []
+            # (?<!\d) hindrer at siste sifre i årstallet (2026) feiltolkes som dag.
+            for m in re.finditer(rf"(?<!\d)(\d{{1,2}})\.?\s*({month_alt})", lower):
+                day, month_name = int(m.group(1)), m.group(2)
+                month = MONTH_NAMES[month_name]
+                max_day = _calendar.monthrange(yr, month)[1]
+                if 1 <= day <= max_day:
+                    explicit_dates.append(_date(yr, month, day))
 
-        spans = []
-        for season in matched_seasons:
-            start_m, end_m = SEASON_MONTHS[season]
-            if season in ("vinter",):
-                spans.append((_date(year, 12, 1), _date(year + 1, 2, 28)))
-            else:
-                spans.append((_date(year, start_m, 1), _date(year, end_m, 28)))
+            spans = []
+            for season in matched_seasons:
+                start_m, end_m = SEASON_MONTHS[season]
+                if season == "vinter":
+                    spans.append((_date(yr, 12, 1), _date(yr + 1, 2, 28)))
+                else:
+                    spans.append((_date(yr, start_m, 1), _date(yr, end_m, 28)))
 
-        if explicit_dates:
-            # Eksplisitte datoer gitt - bruk disse presist, ikke hele måneder
-            # (selv om månedsnavnene også nevnes andre steder i meldingen).
-            spans.extend((d, d) for d in explicit_dates)
+            if explicit_dates:
+                # Eksplisitte datoer gitt - bruk disse presist, ikke hele måneder
+                spans.extend((d, d) for d in explicit_dates)
+            elif not spans:
+                for month_name in MONTH_NAMES:
+                    if month_name in lower:
+                        m = MONTH_NAMES[month_name]
+                        last_day = _calendar.monthrange(yr, m)[1]
+                        spans.append((_date(yr, m, 1), _date(yr, m, last_day)))
+            return spans
+
+        if explicit_year:
+            year = explicit_year
+            spans = build_spans(year)
         else:
-            for month_name in MONTH_NAMES:
-                if month_name in lower:
-                    m = MONTH_NAMES[month_name]
-                    last_day = _calendar.monthrange(year, m)[1]
-                    spans.append((_date(year, m, 1), _date(year, m, last_day)))
+            # Ingen årstall oppgitt, men måned/sesong er nevnt - anta
+            # inneværende år, eller neste år hvis perioden allerede er passert.
+            today = _date.today()
+            year = today.year
+            spans = build_spans(year)
+            if spans and max(e for _, e in spans) < today:
+                year += 1
+                spans = build_spans(year)
+            year_note = f" (antok {year} siden du ikke oppga årstall)"
 
         if spans:
             overall_start = min(s for s, _ in spans)
             overall_end = max(e for _, e in spans)
             date_from = overall_start.strftime("%Y-%m-%d")
             date_to = overall_end.strftime("%Y-%m-%d")
-        else:
+        elif explicit_year:
             date_from = f"{year}-01-01"
             date_to = f"{year}-12-31"
 
@@ -294,6 +313,7 @@ def parse_command(text):
         "date_from": date_from,
         "date_to": date_to,
         "cabin": cabin,
+        "year_note": year_note,
     }
 
 
@@ -380,13 +400,16 @@ def main():
             continue
 
         if matches:
-            header = f"✈️ {len(matches)} treff for \"{html.escape(text.strip())}\":\n"
-            body = MATCH_SEPARATOR.join(format_match(m) for m in matches)
-            send_telegram(header + "\n" + body, parse_mode="HTML", chat_id=sender_chat_id)
+            header = f"✈️ {len(matches)} dato-kombinasjoner for \"{html.escape(text.strip())}\"{group.get('year_note', '')}:"
+            message_blocks = [format_match(m) for m in matches]
+            chunks = chunk_blocks(message_blocks, MATCH_SEPARATOR, max_len=3800)
+            for i, chunk in enumerate(chunks):
+                msg = f"{header}\n\n{chunk}" if i == 0 else chunk
+                send_telegram(msg, parse_mode="HTML", chat_id=sender_chat_id)
         else:
             date_desc = f" ({group['date_from']} til {group['date_to']})" if group['date_from'] else ""
             send_telegram(
-                f"✈️ Ingen ledige seter funnet for \"{text.strip()}\"{date_desc} akkurat nå.",
+                f"✈️ Ingen ledige seter funnet for \"{text.strip()}\"{group.get('year_note', '')}{date_desc} akkurat nå.",
                 chat_id=sender_chat_id,
             )
 
@@ -395,4 +418,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-  
