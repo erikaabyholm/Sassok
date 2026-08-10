@@ -112,6 +112,27 @@ def format_match(m):
     return "\n".join(lines)
 
 
+def chunk_blocks(blocks, separator, max_len=3800):
+    """Grupperer en liste med selvstendige tekstblokker (f.eks. formaterte
+    treff, hver med hele <a>-tagger) til meldinger som ikke overskrider
+    Telegrams lengdegrense - uten noen gang å dele opp én blokk midt i,
+    slik at HTML-lenker aldri kuttes i to."""
+    chunks = []
+    current = []
+    current_len = 0
+    for block in blocks:
+        needed = len(block) + (len(separator) if current else 0)
+        if current and current_len + needed > max_len:
+            chunks.append(separator.join(current))
+            current = []
+            current_len = 0
+        current.append(block)
+        current_len += len(block) + (len(separator) if len(current) > 1 else 0)
+    if current:
+        chunks.append(separator.join(current))
+    return chunks
+
+
 def send_telegram(message, parse_mode=None, chat_id=None):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID")
@@ -165,10 +186,13 @@ def main():
     today = os.popen("date +%Y-%m-%d").read().strip()
 
     if all_matches:
-        header = f"✈️ Awardhacks-sjekk {today} - {len(all_matches)} treff:\n"
-        body = MATCH_SEPARATOR.join(format_match(m) for m in all_matches)
-        message = header + "\n" + body
-        send_telegram(message, parse_mode="HTML")
+        header = f"✈️ Awardhacks-sjekk {today} - {len(all_matches)} treff:"
+        message_blocks = [format_match(m) for m in all_matches]
+        chunks = chunk_blocks(message_blocks, MATCH_SEPARATOR, max_len=3800)
+        for i, chunk in enumerate(chunks):
+            text = f"{header}\n\n{chunk}" if i == 0 else chunk
+            send_telegram(text, parse_mode="HTML")
+        message = header + "\n\n" + MATCH_SEPARATOR.join(message_blocks)
     else:
         message = f"✈️ Awardhacks-sjekk {today}: ingen ledige bonusseter for søkegruppene ({', '.join(labels) or 'ingen'}) akkurat nå."
         send_telegram(message)
