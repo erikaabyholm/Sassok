@@ -186,7 +186,7 @@ def main():
     today = os.popen("date +%Y-%m-%d").read().strip()
 
     if all_matches:
-        header = f"✈️ Awardhacks-sjekk {today} - {len(all_matches)} treff:"
+        header = f"✈️ Awardhacks-sjekk {today} - {len(all_matches)} dato-kombinasjoner:"
         message_blocks = [format_match(m) for m in all_matches]
         chunks = chunk_blocks(message_blocks, MATCH_SEPARATOR, max_len=3800)
         for i, chunk in enumerate(chunks):
