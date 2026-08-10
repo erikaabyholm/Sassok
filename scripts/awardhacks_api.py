@@ -84,7 +84,7 @@ def resolve_site_codes(codes):
 
 
 def search_one(session, token, from_code, to_code, cabin="any",
-                return_trip=True, min_days=0, max_days=60):
+                return_trip=True, min_days=10, max_days=21):
     """Gjør ett søk mot awardhacks.se for en spesifikk from/to-kombinasjon.
     Returnerer en liste med rå-rader (samme format som før: dict med
     'texts' og 'tds')."""
@@ -230,7 +230,7 @@ def build_match(row, group_label):
 
 
 def search_group_matches(group_label, from_codes, to_codes, date_from="", date_to="",
-                          cabin="any", min_days=0, max_days=60):
+                          cabin="any", min_days=10, max_days=21):
     """Høynivå-funksjon: søker en gruppe og returnerer ferdige match-dicts,
     filtrert på dato lokalt (siden vi ikke stoler blindt på serverens eget
     datofilter-format)."""
@@ -244,7 +244,7 @@ def search_group_matches(group_label, from_codes, to_codes, date_from="", date_t
             continue
         matches.append(m)
     return matches
-def search_group(from_codes, to_codes, cabin="any", min_days=0, max_days=60):
+def search_group(from_codes, to_codes, cabin="any", min_days=10, max_days=21):
     """Søker alle relevante from/to-kombinasjoner for en søkegruppe, både
     rundtur og enveis, og returnerer alle rå-rader samlet (med duplikater
     fjernet på tvers av kombinasjoner)."""
@@ -278,3 +278,4 @@ def search_group(from_codes, to_codes, cabin="any", min_days=0, max_days=60):
                     all_rows.append(row)
 
     return all_rows
+   
