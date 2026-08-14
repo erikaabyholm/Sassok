@@ -19,7 +19,8 @@
       "label": "Fra tokyo",
       "from": [
         "HND",
-        "NRT"
+        "NRT",
+        "ICN"
       ],
       "to": [
         "CPH",
